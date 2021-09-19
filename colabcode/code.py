@@ -1,8 +1,13 @@
 """base code"""
 import os
+import pathlib
 import subprocess
 
 from pyngrok import ngrok
+
+BASE_FOLDER= pathlib.Path(__file__).parent.resolve()
+BASE_FOLDER= os.path.realpath(f"{BASE_FOLDER}/..")
+print(f"current folder : ${BASE_FOLDER}")
 
 try:
     COLAB_ENV = True
@@ -44,6 +49,7 @@ class ColabCode:
         self._mount = mount_drive
         self._prompt = prompt
         self._zsh = get_zsh
+        self.url=None
         self.extensions = EXTENSIONS
         if add_extensions is not None and add_extensions != []:
             if isinstance(add_extensions, list) and isinstance(add_extensions[0], str):
@@ -60,23 +66,34 @@ class ColabCode:
         self._start_server()
         self._run_code()
 
+
+    def __del__(self):
+        ngrok.disconnect(self.url)
+        ngrok.kill()
+
     def _settings(self):
         """install ohmybash and set up code_server settings.json file
         Plus, set up powerline bash prompt
         https://github.com/ohmybash/oh-my-bash
         https://github.com/cdr/code-server/issues/1680#issue-620677320
         """
-        subprocess.run(
-            [
-                "wget",
-                "https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh",
-                "-O",
-                "install_ohmybash.sh",
-            ],
-            stdout=PIPE,
-            check=True,
-        )
-        subprocess.run(["sh", "install_ohmybash.sh"], stdout=PIPE, check=True)
+        ohmybash_filename="install_ohmybash.sh"
+        if (not os.path.exists(ohmybash_filename)):
+            process= subprocess.run(
+                [
+                    "wget",
+                    "https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh",
+                    "-O",
+                    ohmybash_filename,
+                ],
+                stdout=PIPE,
+                check=True,
+            )
+            print(f"wget output: {process}")
+        else:
+            print(f"{ohmybash_filename} exists. skipping...")
+
+        subprocess.run(["sh", ohmybash_filename], stdout=PIPE, check=True)
 
         if self._zsh:
             subprocess.run(["sh", "./code_server/get_zsh.sh"], stdout=PIPE, check=True)
@@ -90,7 +107,7 @@ class ColabCode:
             "powerline-undu",
         ]:
             subprocess.run(
-                ["sh", "./code_server/sed.sh", f"{self._prompt}"],
+                ["sh", f"{BASE_FOLDER}/code_server/sed.sh", f"{self._prompt}"],
                 stdout=PIPE,
                 check=True,
             )
@@ -103,7 +120,7 @@ class ColabCode:
             ".undu-powerline.bash": "~/.powerline.bash",
         }.items():
             subprocess.call(
-                f"cp ./code_server/{src} {dest}",
+                f"cp {BASE_FOLDER}/code_server/{src} {dest}",
                 stdout=PIPE,
                 shell=True,
             )
@@ -117,12 +134,17 @@ class ColabCode:
         )
 
     def _install_code(self):
-        subprocess.run(
-            ["wget", "https://code-server.dev/install.sh"],
-            stdout=PIPE,
-            check=True,
-        )
-        subprocess.run(["sh", "install.sh"], stdout=PIPE, check=True)
+        codeserver_filename="code-server-install.sh"
+        if not os.path.exists(codeserver_filename):
+            subprocess.run(
+                ["wget", "https://code-server.dev/install.sh", "-O", codeserver_filename],
+                stdout=PIPE,
+                check=True,
+            )
+        else:
+            print(f"{codeserver_filename} exists. skipping...")
+            
+        subprocess.run(["sh", codeserver_filename], stdout=PIPE, check=True)
 
     def _install_extensions(self):
         """set check as False - otherwise non existing extension will give error"""
@@ -136,14 +158,15 @@ class ColabCode:
         for tunnel in active_tunnels:
             public_url = tunnel.public_url
             ngrok.disconnect(public_url)
-        url = ngrok.connect(port=self.port, options={"bind_tls": True})
-        print(f"Code Server can be accessed on: {url}")
+        self.url = ngrok.connect(port=self.port, options={"bind_tls": True})
+
+        print(f"Code Server can be accessed on: {self.url}")
 
     def _run_code(self):
         os.system(f"fuser -n tcp -k {self.port}")
         _tele = "--disable-telemetry"
         if self._mount and COLAB_ENV:
-            drive.mount("/content/drive")
+            print(drive.mount("/content/drive"))
         if self.password:
             code_cmd = (
                 f"PASSWORD={self.password} code-server --port {self.port} {_tele}"
@@ -159,3 +182,5 @@ class ColabCode:
         ) as proc:
             for line in proc.stdout:
                 print(line, end="")
+
+    
